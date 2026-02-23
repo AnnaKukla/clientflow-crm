@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   Card,
@@ -12,176 +11,205 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+  DialogClose,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 
-export default function AuthPage() {
-  const [tab, setTab] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface Client {
+  id: number;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  primary_request?: string | null;
+  [key: string]: any;
+}
 
-  const router = useRouter();
+export default function ClientsPage() {
+  const [clients, setClients] = useState<Client[] | null>(null);
+  const [loadingClients, setLoadingClients] = useState(true);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
-  const resetFields = () => {
-    setEmail("");
-    setPassword("");
-    setConfirm("");
-    setError(null);
-  };
+  // Add client form states
+  const [addName, setAddName] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [addPhone, setAddPhone] = useState("");
+  const [addPrimaryRequest, setAddPrimaryRequest] = useState("");
 
-  const handleTabChange = (value: string) => {
-    setTab(value as "login" | "register");
-    resetFields();
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    setLoading(false);
-    if (error) {
-      setError(error.message);
-    } else if (data?.session) {
-      router.push("/dashboard");
+  // Fetch clients from Supabase
+  const fetchClients = async () => {
+    setLoadingClients(true);
+    const { data, error } = await supabase
+      .from("clients")
+      .select("*")
+      .order("id", { ascending: false });
+    setLoadingClients(false);
+    if (!error) {
+      setClients(data);
+    } else {
+      setClients([]);
     }
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
+  useEffect(() => {
+    fetchClients();
+  }, []);
+
+  // Handle add client
+  const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    if (password !== confirm) {
-      setError("Пароли не совпадают");
+    setAddError(null);
+
+    if (!addName.trim()) {
+      setAddError("Имя обязательно");
       return;
     }
-    setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    setLoading(false);
+    setAddLoading(true);
+
+    const { error } = await supabase.from("clients").insert([
+      {
+        name: addName,
+        email: addEmail || null,
+        phone: addPhone || null,
+        primary_request: addPrimaryRequest || null,
+      },
+    ]);
+    setAddLoading(false);
+
     if (error) {
-      setError(error.message);
-    } else if (data?.user) {
-      // Опционально: сообщить о необходимости подтверждения почты
-      router.push("/dashboard");
+      setAddError(error.message);
+    } else {
+      // Reset fields, close dialog, refresh clients
+      setAddName("");
+      setAddEmail("");
+      setAddPhone("");
+      setAddPrimaryRequest("");
+      setAddDialogOpen(false);
+      fetchClients();
     }
   };
 
   return (
     <div className="flex h-screen w-screen justify-center items-center bg-gradient-to-tr from-slate-100 to-slate-200">
-      <Card className="w-full max-w-md shadow-xl">
+      <Card className="w-full max-w-3xl shadow-xl">
         <CardHeader className="text-center">
-          <img
-            src="/logo.svg"
-            alt="ClientFlow CRM"
-            className="mx-auto h-12 w-12 mb-2"
-            style={{ display: "block" }}
-            onError={e => {
-              // fallback if logo.svg doesn't exist
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
-          />
           <CardTitle className="text-2xl font-bold tracking-tight">
-            ClientFlow CRM
+            Клиенты
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs value={tab} onValueChange={handleTabChange} className="w-full">
-            <TabsList className="grid grid-cols-2 mb-6 w-full">
-              <TabsTrigger value="login">Войти</TabsTrigger>
-              <TabsTrigger value="register">Регистрация</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="login">
-              <form onSubmit={handleLogin} className="space-y-4">
-                <Input
-                  type="email"
-                  required
-                  placeholder="Email"
-                  autoComplete="username"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  disabled={loading}
-                />
-                <Input
-                  type="password"
-                  required
-                  placeholder="Пароль"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  disabled={loading}
-                />
-                {error && (
-                  <Alert variant="destructive">
-                    <AlertTitle>Ошибка</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={loading}
-                >
-                  {loading ? "Вход..." : "Войти"}
-                </Button>
-              </form>
-            </TabsContent>
-
-            <TabsContent value="register">
-              <form onSubmit={handleRegister} className="space-y-4">
-                <Input
-                  type="email"
-                  required
-                  placeholder="Email"
-                  autoComplete="username"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  disabled={loading}
-                />
-                <Input
-                  type="password"
-                  required
-                  placeholder="Пароль"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  disabled={loading}
-                  minLength={6}
-                />
-                <Input
-                  type="password"
-                  required
-                  placeholder="Подтверждение пароля"
-                  autoComplete="new-password"
-                  value={confirm}
-                  onChange={e => setConfirm(e.target.value)}
-                  disabled={loading}
-                  minLength={6}
-                />
-                {error && (
-                  <Alert variant="destructive">
-                    <AlertTitle>Ошибка</AlertTitle>
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={loading}
-                >
-                  {loading ? "Регистрация..." : "Зарегистрироваться"}
-                </Button>
-              </form>
-            </TabsContent>
-          </Tabs>
+          <div className="flex justify-end mb-4">
+            <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button>Добавить клиента</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Добавить клиента</DialogTitle>
+                  <DialogDescription>
+                    Введите данные нового клиента.
+                  </DialogDescription>
+                </DialogHeader>
+                <form id="add-client-form" onSubmit={handleAddClient} className="space-y-4 pt-2">
+                  <Input
+                    required
+                    placeholder="Имя*"
+                    value={addName}
+                    onChange={e => setAddName(e.target.value)}
+                    disabled={addLoading}
+                  />
+                  <Input
+                    type="email"
+                    placeholder="Email"
+                    value={addEmail}
+                    onChange={e => setAddEmail(e.target.value)}
+                    disabled={addLoading}
+                  />
+                  <Input
+                    placeholder="Телефон"
+                    value={addPhone}
+                    onChange={e => setAddPhone(e.target.value)}
+                    disabled={addLoading}
+                  />
+                  <Input
+                    placeholder="Первичный запрос"
+                    value={addPrimaryRequest}
+                    onChange={e => setAddPrimaryRequest(e.target.value)}
+                    disabled={addLoading}
+                  />
+                  {addError && (
+                    <Alert variant="destructive">
+                      <AlertTitle>Ошибка</AlertTitle>
+                      <AlertDescription>{addError}</AlertDescription>
+                    </Alert>
+                  )}
+                </form>
+                <DialogFooter>
+                  <Button
+                    type="submit"
+                    form="add-client-form"
+                    disabled={addLoading}
+                  >
+                    {addLoading ? "Добавление..." : "Добавить"}
+                  </Button>
+                  <DialogClose asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={addLoading}
+                    >
+                      Отмена
+                    </Button>
+                  </DialogClose>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+          {loadingClients ? (
+            <div className="py-12 text-center text-gray-500 text-lg">
+              Загрузка клиентов...
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border rounded-md">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="py-2 px-4 border-b">Имя</th>
+                    <th className="py-2 px-4 border-b">Email</th>
+                    <th className="py-2 px-4 border-b">Телефон</th>
+                    <th className="py-2 px-4 border-b">Первичный запрос</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clients && clients.length > 0 ? (
+                    clients.map((client) => (
+                      <tr key={client.id} className="odd:bg-white even:bg-gray-50">
+                        <td className="py-2 px-4 border-b">{client.name}</td>
+                        <td className="py-2 px-4 border-b">{client.email || <span className="text-gray-300">—</span>}</td>
+                        <td className="py-2 px-4 border-b">{client.phone || <span className="text-gray-300">—</span>}</td>
+                        <td className="py-2 px-4 border-b">{client.primary_request || <span className="text-gray-300">—</span>}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-gray-400">
+                        Нет клиентов
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
         <CardFooter className="justify-center text-xs text-gray-400 mt-2">
           © {new Date().getFullYear()} ClientFlow CRM
