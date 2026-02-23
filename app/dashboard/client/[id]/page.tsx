@@ -7,14 +7,17 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Trash } from "lucide-react";
 
+// Включаем main_request и therapy_goals!
 type Client = {
   id: string;
   name: string;
   email: string | null;
   phone: string | null;
-  primary_request: string | null;
   status: string | null;
+  main_request: string | null;
+  therapy_goals: string | null;
 };
 
 type Note = {
@@ -24,7 +27,25 @@ type Note = {
   user_id: string;
 };
 
-function formatDate(dateStr: string) {
+function formatDateHuman(dateStr: string) {
+  // "23 февраля 2024"
+  const options: Intl.DateTimeFormatOptions = {
+    day: "2-digit",
+    month: "long",
+    year: "numeric"
+  };
+  const date = new Date(dateStr);
+  // Capitalized month
+  const result = date.toLocaleDateString("ru-RU", options);
+  // Make first letter lowercase for month name (e.g. "февраля")
+  return result.replace(
+    /(\d{2}) (\p{L}+)( \d{4})/u,
+    (_, d, m, y) =>
+      `${d} ${m.charAt(0).toLowerCase()}${m.slice(1)}${y}`
+  );
+}
+function formatDateTimeExact(dateStr: string) {
+  // "23.02.2024, 14:30"
   const date = new Date(dateStr);
   return date.toLocaleString("ru-RU", {
     day: "2-digit",
@@ -38,7 +59,12 @@ function formatDate(dateStr: string) {
 export default function ClientCardPage() {
   const router = useRouter();
   const params = useParams();
-  const id = typeof params.id === "string" ? params.id : Array.isArray(params.id) ? params.id[0] : "";
+  const id =
+    typeof params.id === "string"
+      ? params.id
+      : Array.isArray(params.id)
+      ? params.id[0]
+      : "";
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,15 +75,18 @@ export default function ClientCardPage() {
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
 
   const fetchClientAndNotes = async () => {
     setLoading(true);
     setNotesLoading(true);
 
-    // Fetch client
+    // Теперь явно запрашиваем нужные поля (без primary_request)
     const { data: clientData, error: clientError } = await supabase
       .from("clients")
-      .select("*")
+      .select(
+        "id, name, email, phone, status, main_request, therapy_goals"
+      )
       .eq("id", id)
       .single();
 
@@ -113,11 +142,28 @@ export default function ClientCardPage() {
     if (error) {
       setNoteError("Ошибка при сохранении заметки.");
     } else if (data) {
-      setNotes(prev => [{ ...data }, ...prev]);
+      setNotes((prev) => [{ ...data }, ...prev]);
       setNewNote("");
     }
     setAddingNote(false);
   };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!window.confirm("Удалить эту заметку? Вернуть её будет нельзя.")) return;
+    setDeletingNoteId(noteId);
+    await supabase.from("notes").delete().eq("id", noteId);
+    setNotes(prev => prev.filter(n => n.id !== noteId));
+    setDeletingNoteId(null);
+  };
+
+  // Playfair font utility for headings
+  // (в классы добавим font-serif, text-xl/2xl или кастом на Playfair, зависит от globals.css)
+  // ОЖИДАЕТСЯ: --font-playfair/Playfair подключен в layout.tsx как className
+
+  // Сортировка - новые заметки сверху (запасная, если придет unsorted)
+  const sortedNotes = [...notes].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 
   return (
     <main className="max-w-2xl mx-auto py-8 px-4">
@@ -130,12 +176,57 @@ export default function ClientCardPage() {
       </Button>
 
       {loading ? (
-        <div className="text-center py-10 text-muted-foreground">Загрузка...</div>
+        <div className="text-center py-10 text-muted-foreground">
+          Загрузка...
+        </div>
       ) : !client ? (
-        <div className="text-center py-10 text-red-600 font-semibold">Клиент не найден</div>
+        <div className="text-center py-10 text-red-600 font-semibold">
+          Клиент не найден
+        </div>
       ) : (
         <>
-          <h1 className="text-3xl font-bold mb-8">{client.name}</h1>
+          <h1 className="text-3xl font-bold mb-6">{client.name}</h1>
+          {/* Винтажные блоки "Запрос" и "Цели терапии" */}
+          <div className="flex flex-col gap-4 mb-10">
+            <div
+              className="rounded-xl px-6 py-4"
+              style={{
+                background:
+                  "oklch(0.97 0.03 90)", // мягкий теплый бумажный/пергамент фон
+                border: "1px solid oklch(0.85 0.015 85)",
+                boxShadow: "0 2px 6px 0 oklch(0.85 0.015 85 / .06)",
+              }}
+            >
+              <div
+                className="font-serif text-2xl mb-2 text-primary"
+                style={{ fontFamily: "var(--font-playfair),serif" }}
+              >
+                Запрос
+              </div>
+              <div className="text-lg whitespace-pre-line text-foreground">
+                {client.main_request?.trim()
+                  ? client.main_request
+                  : <span className="text-gray-400">—</span>}
+              </div>
+            </div>
+            <div
+              className="rounded-xl px-6 py-4"
+              style={{
+                background: "oklch(0.97 0.03 90)",
+                border: "1px solid oklch(0.85 0.015 85)",
+                boxShadow: "0 2px 6px 0 oklch(0.85 0.015 85 / .06)",
+              }}
+            >
+              <div className="font-serif text-2xl mb-2 text-primary" style={{ fontFamily: "var(--font-playfair),serif" }}>
+                Цели терапии
+              </div>
+              <div className="text-lg whitespace-pre-line text-foreground">
+                {client.therapy_goals?.trim()
+                  ? client.therapy_goals
+                  : <span className="text-gray-400">—</span>}
+              </div>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-8">
             <Card>
@@ -146,7 +237,12 @@ export default function ClientCardPage() {
                 <div>
                   <span className="text-gray-500">Email: </span>
                   {client.email ? (
-                    <a href={`mailto:${client.email}`} className="text-blue-600 hover:underline">{client.email}</a>
+                    <a
+                      href={`mailto:${client.email}`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {client.email}
+                    </a>
                   ) : (
                     <span className="text-gray-400">—</span>
                   )}
@@ -156,15 +252,15 @@ export default function ClientCardPage() {
                   {client.phone || <span className="text-gray-400">—</span>}
                 </div>
                 <div>
-                  <span className="text-gray-500">Первичный запрос: </span>
-                  {client.primary_request || <span className="text-gray-400">—</span>}
-                </div>
-                <div>
                   <span className="text-gray-500">Статус: </span>
                   {client.status === "Новый" ? (
-                    <Badge className="bg-blue-100 text-blue-700 border-blue-200">Новый</Badge>
+                    <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+                      Новый
+                    </Badge>
                   ) : client.status === "В работе" ? (
-                    <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">В работе</Badge>
+                    <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">
+                      В работе
+                    </Badge>
                   ) : (
                     <Badge>{client.status}</Badge>
                   )}
@@ -177,10 +273,13 @@ export default function ClientCardPage() {
                 <CardTitle>Заметки сессий</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleAddNote} className="mb-6 flex flex-col gap-3">
+                <form
+                  onSubmit={handleAddNote}
+                  className="mb-6 flex flex-col gap-3"
+                >
                   <Textarea
                     value={newNote}
-                    onChange={e => setNewNote(e.target.value)}
+                    onChange={(e) => setNewNote(e.target.value)}
                     placeholder="Новая заметка по сессии..."
                     rows={3}
                     disabled={addingNote}
@@ -192,25 +291,60 @@ export default function ClientCardPage() {
                     </div>
                   )}
                   <div>
-                    <Button type="submit" disabled={addingNote || !newNote.trim()}>
+                    <Button
+                      type="submit"
+                      disabled={addingNote || !newNote.trim()}
+                    >
                       {addingNote ? "Сохранение..." : "Сохранить"}
                     </Button>
                   </div>
                 </form>
                 <div className="flex flex-col gap-4">
                   {notesLoading ? (
-                    <div className="text-muted-foreground text-center py-4">Загрузка заметок...</div>
-                  ) : notes.length === 0 ? (
-                    <div className="text-gray-400 text-sm text-center">Нет заметок.</div>
+                    <div className="text-muted-foreground text-center py-4">
+                      Загрузка заметок...
+                    </div>
+                  ) : sortedNotes.length === 0 ? (
+                    <div className="text-gray-400 text-sm text-center">
+                      Нет заметок.
+                    </div>
                   ) : (
-                    notes.map(note => (
-                      <div
+                    sortedNotes.map((note) => (
+                      <Card
                         key={note.id}
-                        className="border rounded-md px-4 py-3 bg-gray-50 flex flex-col gap-2"
+                        className="rounded-[18px] border-[1.5px] px-0 py-0 bg-[oklch(0.98_0.02_88)] border-[oklch(0.82_0.015_82)] shadow-[0_2px_8px_0_oklch(0.85_0.015_85_/_0.048)] overflow-hidden flex flex-col"
+                        style={{
+                          // Легкая имитация винтажности и "стопки"
+                          marginBottom: "0.25em",
+                        }}
                       >
-                        <div className="whitespace-pre-line">{note.content}</div>
-                        <div className="text-xs text-gray-500 mt-1">{formatDate(note.created_at)}</div>
-                      </div>
+                        <div className="flex items-center justify-between px-5 pt-4 pb-2">
+                          <div
+                            className="font-serif text-lg text-primary"
+                            style={{ fontFamily: "var(--font-playfair),serif" }}
+                          >
+                            Сессия от {formatDateHuman(note.created_at)}
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="hover:bg-rose-50 text-rose-500"
+                            title="Удалить заметку"
+                            disabled={deletingNoteId === note.id}
+                            onClick={() => handleDeleteNote(note.id)}
+                          >
+                            <Trash size={18} />
+                          </Button>
+                        </div>
+                        <div className="px-5 pb-3">
+                          <div className="whitespace-pre-line text-base text-foreground">
+                            {note.content}
+                          </div>
+                          <div className="text-xs text-gray-400 text-right font-serif mt-4" style={{ fontFamily: "var(--font-playfair),serif" }}>
+                            {formatDateTimeExact(note.created_at)}
+                          </div>
+                        </div>
+                      </Card>
                     ))
                   )}
                 </div>

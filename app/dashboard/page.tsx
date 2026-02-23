@@ -15,7 +15,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { Pencil, Trash, Eye, Search } from "lucide-react";
+import { Pencil, Trash, Eye, Search, FileText } from "lucide-react";
 
 // Для форматирования даты и времени по-русски
 const formatRusDateTime = (dateString: string | null | undefined) => {
@@ -53,6 +53,10 @@ function getStatusBadge(status: string) {
   }
 }
 
+// ----- Новый блок для отчёта -----
+type NotesMap = { [userId: string]: number };
+type ActivityMap = { [userId: string]: { name: string; count: number } };
+
 export default function DashboardPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -70,6 +74,8 @@ export default function DashboardPage() {
   const [addEmail, setAddEmail] = useState("");
   const [addPhone, setAddPhone] = useState("");
   const [addPrimaryRequest, setAddPrimaryRequest] = useState("");
+  const [addMainRequest, setAddMainRequest] = useState(""); // Новое поле (main_request)
+  const [addTherapyGoals, setAddTherapyGoals] = useState(""); // Новое поле (therapy_goals)
   const [addStatus, setAddStatus] = useState("Новый");
   const [addNextSession, setAddNextSession] = useState(""); // <---- new state
   const [addLoading, setAddLoading] = useState(false);
@@ -82,8 +88,20 @@ export default function DashboardPage() {
   const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editNextSession, setEditNextSession] = useState(""); // <---- new state
+  const [editMainRequest, setEditMainRequest] = useState(""); // Новое поле (main_request)
+  const [editTherapyGoals, setEditTherapyGoals] = useState(""); // Новое поле (therapy_goals)
   const [editClientLoading, setEditClientLoading] = useState(false);
   const [editClientError, setEditClientError] = useState<string | null>(null);
+
+  // --- State for report dialog ---
+  const [showReport, setShowReport] = useState(false);
+  const [reportNotes, setReportNotes] = useState<any[]>([]);
+  const [fetchingNotes, setFetchingNotes] = useState<boolean>(false);
+
+  // Параметры для отчета
+  const reportYear = 2026;
+  const reportMonth = 1; // февраль (0 - январь)
+  const reportMonthRu = "февраль";
 
   // Fetch clients on mount
   const fetchClients = async () => {
@@ -96,6 +114,35 @@ export default function DashboardPage() {
       setClients(data || []);
     }
     setFetchingClients(false);
+  };
+
+  // Fetch notes для отчета
+  const fetchNotesForReport = async () => {
+    setFetchingNotes(true);
+    // Получаем все заметки за нужный месяц и год
+    // created_at между 2026-02-01 и 2026-02-29
+    const start = new Date(reportYear, reportMonth, 1, 0, 0, 0).toISOString();
+    // Март без день - это первое число следующего месяца
+    const end = new Date(reportYear, reportMonth + 1, 1, 0, 0, 0).toISOString();
+    const { data, error } = await supabase
+      .from("notes")
+      .select("*")
+      .gte("created_at", start)
+      .lt("created_at", end);
+
+    if (!error) {
+      setReportNotes(data || []);
+    } else {
+      setReportNotes([]);
+    }
+    setFetchingNotes(false);
+  };
+
+  // Открытие окна отчета
+  const handleOpenReport = async () => {
+    setShowReport(true);
+    // Загружаем заметки только при открытии
+    await fetchNotesForReport();
   };
 
   useEffect(() => {
@@ -129,6 +176,8 @@ export default function DashboardPage() {
       email: addEmail ? addEmail : null,
       phone: addPhone ? addPhone : null,
       primary_request: addPrimaryRequest ? addPrimaryRequest : null,
+      main_request: addMainRequest ? addMainRequest : null,
+      therapy_goals: addTherapyGoals ? addTherapyGoals : null,
       status: addStatus,
       user_id: userData.user.id,
       next_session: addNextSession ? new Date(addNextSession).toISOString() : null,
@@ -144,6 +193,8 @@ export default function DashboardPage() {
       setAddEmail("");
       setAddPhone("");
       setAddPrimaryRequest("");
+      setAddMainRequest("");
+      setAddTherapyGoals("");
       setAddStatus("Новый");
       setAddNextSession(""); // Очистить поле сессии
       await fetchClients();
@@ -174,14 +225,16 @@ export default function DashboardPage() {
         ? new Date(client.next_session).toISOString().slice(0, 16)
         : ""
     );
+    setEditMainRequest(client.main_request || "");
+    setEditTherapyGoals(client.therapy_goals || "");
     setEditClientError(null);
     setShowEditDialog(true);
   };
 
-  // Функция для обновления клиента (теперь с next_session)
+  // Функция для обновления клиента (теперь с next_session, main_request, therapy_goals)
   const updateClient = async (
     id: number,
-    values: { name: string; email: string; phone: string; next_session: string }
+    values: { name: string; email: string; phone: string; next_session: string; main_request: string; therapy_goals: string }
   ) => {
     setEditClientLoading(true);
     setEditClientError(null);
@@ -194,6 +247,8 @@ export default function DashboardPage() {
         next_session: values.next_session
           ? new Date(values.next_session).toISOString()
           : null,
+        main_request: values.main_request || null,
+        therapy_goals: values.therapy_goals || null,
       })
       .eq("id", id);
 
@@ -216,6 +271,8 @@ export default function DashboardPage() {
       email: editEmail,
       phone: editPhone,
       next_session: editNextSession,
+      main_request: editMainRequest,
+      therapy_goals: editTherapyGoals,
     });
 
     if (success) {
@@ -253,6 +310,26 @@ export default function DashboardPage() {
     });
   }, [clients]);
 
+  // ---- Добавляем статистику: всего клиентов, в работе, сессии на неделе ----
+  const totalClients = useMemo(() => clients.length, [clients]);
+  const inProgressClients = useMemo(
+    () => clients.filter((c) => c.status === "В работе").length,
+    [clients]
+  );
+  const sessionsThisWeek = useMemo(() => {
+    // Ближайшие 7 дней, включая сегодня
+    const now = new Date();
+    const endOfWeek = new Date();
+    endOfWeek.setHours(23, 59, 59, 999);
+    endOfWeek.setDate(now.getDate() + 6);
+    return clients.filter((client) => {
+      if (!client.next_session) return false;
+      const dt = new Date(client.next_session);
+      return dt >= now && dt <= endOfWeek;
+    }).length;
+  }, [clients]);
+  // -------------------------------------------------------------------------
+
   // Поиск клиентов: фильтрация по имени или email
   const filteredClients = useMemo(() => {
     if (!searchQuery.trim()) return clients;
@@ -263,6 +340,48 @@ export default function DashboardPage() {
         (client.email && client.email.toLowerCase().includes(q))
     );
   }, [searchQuery, clients]);
+
+  // ----------- вычисления для отчета (мемоизация по clients, reportNotes) -------------
+  const reportStartDate = new Date(reportYear, reportMonth, 1, 0, 0, 0, 0);
+  const reportEndDate = new Date(reportYear, reportMonth + 1, 0, 23, 59, 59, 999); // последний день месяца
+
+  // Новые клиенты за месяц
+  const newClientsCount = useMemo(() => {
+    // created_at между началом и концом месяца
+    return clients.filter(client => {
+      if (!client.created_at) return false;
+      const dt = new Date(client.created_at);
+      return dt >= reportStartDate && dt <= reportEndDate;
+    }).length;
+  }, [clients, reportYear, reportMonth]);
+
+  // Всего сессий за месяц (отчетNotes длина)
+  const sessionsCount = useMemo(() => {
+    if (!Array.isArray(reportNotes)) return 0;
+    return reportNotes.length;
+  }, [reportNotes]);
+
+  // Активные клиенты (по числу заметок за месяц)
+  const topActiveClients = useMemo(() => {
+    // Собираем счетчики по user_id
+    if (!Array.isArray(reportNotes)) return [];
+    const counter: Record<string, number> = {};
+    reportNotes.forEach(note => {
+      if (note.user_id) {
+        counter[note.user_id] = (counter[note.user_id] ?? 0) + 1;
+      }
+    });
+    // Найти клиентов по id
+    const activeArr = Object.entries(counter)
+      .map(([userId, count]) => {
+        const client = clients.find(c => String(c.id) === String(userId));
+        return client
+          ? { name: client.name, count }
+          : { name: `ID ${userId}`, count };
+      });
+    // Сортировать по активности
+    return activeArr.sort((a, b) => b.count - a.count).slice(0, 5); // top 5
+  }, [reportNotes, clients]);
 
   // ----------------------------------------------------------
 
@@ -284,7 +403,22 @@ export default function DashboardPage() {
       <main className="flex flex-col flex-1 w-full max-w-5xl mx-auto py-10 px-4 gap-6">
         {/* SEARCH and ADD CLIENT ROW */}
         <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
-          <h2 className="text-3xl font-semibold text-slate-900">Мои клиенты</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-3xl font-semibold text-slate-900">Мои клиенты</h2>
+            {/* Кнопка отчета */}
+            <Button
+              variant="outline"
+              className="ml-2 flex gap-2 items-center rounded-full border-[#dfc899] shadow-sm px-4 py-2 font-serif text-[17px] bg-[#fdf7ea] hover:bg-[#fbeed7]"
+              style={{
+                fontFamily: "'Playfair Display', serif", 
+                borderWidth: 1.5,
+              }}
+              onClick={handleOpenReport}
+            >
+              <FileText size={18} className="text-[#b08b39]" />
+              Отчет за месяц
+            </Button>
+          </div>
           <div className="flex flex-1 gap-3 items-center justify-end max-w-lg ml-5">
             {/* Поиск */}
             <div className="relative flex-1 max-w-[320px] min-w-[220px] mr-2">
@@ -311,6 +445,64 @@ export default function DashboardPage() {
             </Button>
           </div>
         </div>
+
+        {/* --- Модальное окно отчёта за месяц --- */}
+        <Dialog open={showReport} onOpenChange={open => setShowReport(open)}>
+          <DialogContent
+            className="rounded-2xl bg-[#fdf7ea] border-[2px] border-[#dfc899] max-w-lg w-full font-serif"
+            style={{ fontFamily: "'Playfair Display', serif" }}
+          >
+            <DialogHeader>
+              <DialogTitle
+                className="mb-2 text-[26px] text-[#755926] font-bold"
+                style={{ fontFamily: "'Playfair Display', serif" }}
+              >
+                Итоги за {reportMonthRu} {reportYear}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="text-base text-[#8b7c5a] py-2">
+              <div className="mb-5 flex flex-col gap-1">
+                <div className="text-[#ad8f4e] text-lg font-semibold mb-0.5">
+                  Новых клиентов:{" "}
+                  <span className="font-bold text-[#76622f]">{fetchingClients ? "..." : newClientsCount}</span>
+                </div>
+                <div className="text-[#ad8f4e] text-lg font-semibold mb-2">
+                  Проведено сессий:{" "}
+                  <span className="font-bold text-[#197945]">{fetchingNotes ? "..." : sessionsCount}</span>
+                </div>
+                <div className="font-semibold text-[#ad8f4e] mt-3 mb-1 text-lg">Самые активные клиенты месяца:</div>
+                {fetchingClients || fetchingNotes ? (
+                  <div className="text-[#ad965c] italic text-base pl-1 py-0.5">Загрузка...</div>
+                ) : topActiveClients.length === 0 ? (
+                  <div className="text-[#b0a06e] italic text-base pl-1 py-0.5">Нет данных</div>
+                ) : (
+                  <ul className="pl-3 list-decimal text-base text-[#7c612d] flex flex-col gap-0.5">
+                    {topActiveClients.map((client, idx) => (
+                      <li key={client.name + idx} className="ml-2">
+                        <span className="font-medium">{client.name}</span>
+                        {client.count > 1 ? (
+                          <span className="text-[#ac843c] text-[14px] ml-2 font-normal">{client.count} сессии</span>
+                        ) : (
+                          <span className="text-[#ad9755] text-[14px] ml-2 font-normal">1 сессия</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="default"
+                className="w-full rounded-xl py-2 bg-[#e7cf95] text-[#55421c] text-lg font-bold hover:bg-[#ecd69d]"
+                style={{ fontFamily: "'Playfair Display', serif" }}
+                onClick={() => window.print()}
+              >
+                Распечатать отчет
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* --- План на сегодня (новый блок) --- */}
         <section aria-label="План на сегодня" className="mb-8">
@@ -354,6 +546,52 @@ export default function DashboardPage() {
           </Card>
         </section>
         {/* --- Конец блока "План на сегодня" --- */}
+
+        {/* --- Блок со статистикой --- */}
+        <section aria-label="Статистика клиентов" className="mb-8">
+          <div className="flex flex-row gap-5 md:gap-7 lg:gap-10 justify-between items-stretch flex-wrap">
+            {/* Всего клиентов */}
+            <div className="flex-1 min-w-[150px] max-w-[260px]">
+              <div
+                className="rounded-[1rem] shadow-md bg-white border border-[#deb76823] px-5 py-4 flex flex-col items-center select-none"
+                style={{
+                  fontFamily: "'Playfair Display', serif",
+                  boxShadow: '0 2px 16px 0 #c7b19818'
+                }}
+              >
+                <span className="text-[15px] text-[#b89238] font-semibold mb-2 tracking-tight">Всего клиентов</span>
+                <span className="text-3xl md:text-4xl font-bold text-slate-800 leading-none">{totalClients}</span>
+              </div>
+            </div>
+            {/* В работе */}
+            <div className="flex-1 min-w-[150px] max-w-[260px]">
+              <div
+                className="rounded-[1rem] shadow-md bg-white border border-[#e6c26023] px-5 py-4 flex flex-col items-center select-none"
+                style={{
+                  fontFamily: "'Playfair Display', serif",
+                  boxShadow: '0 2px 16px 0 #f0dfb818'
+                }}
+              >
+                <span className="text-[15px] text-[#d89c0e] font-semibold mb-2 tracking-tight">В работе</span>
+                <span className="text-3xl md:text-4xl font-bold text-[#8b6f20] leading-none">{inProgressClients}</span>
+              </div>
+            </div>
+            {/* Сессии на этой неделе */}
+            <div className="flex-1 min-w-[150px] max-w-[260px]">
+              <div
+                className="rounded-[1rem] shadow-md bg-white border border-[#61b38b23] px-5 py-4 flex flex-col items-center select-none"
+                style={{
+                  fontFamily: "'Playfair Display', serif",
+                  boxShadow: '0 2px 16px 0 #c6e8db18'
+                }}
+              >
+                <span className="text-[15px] text-[#22aa65] font-semibold mb-2 tracking-tight">Сессии на этой неделе</span>
+                <span className="text-3xl md:text-4xl font-bold text-[#1d9350] leading-none">{sessionsThisWeek}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+        {/* --- Конец блока статистики --- */}
 
         {/* диалог добавления клиента */}
         {showAddDialog && (
@@ -403,6 +641,20 @@ export default function DashboardPage() {
                   placeholder="Первичный запрос"
                   value={addPrimaryRequest}
                   onChange={e => setAddPrimaryRequest(e.target.value)}
+                  disabled={addLoading}
+                />
+                <textarea
+                  className="border rounded px-3 py-2 w-full resize-y min-h-[64px]"
+                  placeholder="Главный запрос (можно описать проблему или цель, с которой обратился клиент)"
+                  value={addMainRequest}
+                  onChange={e => setAddMainRequest(e.target.value)}
+                  disabled={addLoading}
+                />
+                <textarea
+                  className="border rounded px-3 py-2 w-full resize-y min-h-[64px]"
+                  placeholder="Цели терапии (каких изменений ожидает клиент, задачи, запросы)"
+                  value={addTherapyGoals}
+                  onChange={e => setAddTherapyGoals(e.target.value)}
                   disabled={addLoading}
                 />
                 <input
@@ -488,6 +740,20 @@ export default function DashboardPage() {
                   placeholder="Телефон"
                   value={editPhone}
                   onChange={e => setEditPhone(e.target.value)}
+                  disabled={editClientLoading}
+                />
+                <textarea
+                  className="border rounded px-3 py-2 w-full resize-y min-h-[64px]"
+                  placeholder="Главный запрос (можно описать проблему или цель, с которой обратился клиент)"
+                  value={editMainRequest}
+                  onChange={e => setEditMainRequest(e.target.value)}
+                  disabled={editClientLoading}
+                />
+                <textarea
+                  className="border rounded px-3 py-2 w-full resize-y min-h-[64px]"
+                  placeholder="Цели терапии (каких изменений ожидает клиент, задачи, запросы)"
+                  value={editTherapyGoals}
+                  onChange={e => setEditTherapyGoals(e.target.value)}
                   disabled={editClientLoading}
                 />
                 <input
