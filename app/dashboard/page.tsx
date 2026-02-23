@@ -15,7 +15,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { Pencil, Trash, Eye } from "lucide-react";
+import { Pencil, Trash, Eye, Search } from "lucide-react";
 
 // Для форматирования даты и времени по-русски
 const formatRusDateTime = (dateString: string | null | undefined) => {
@@ -60,6 +60,9 @@ export default function DashboardPage() {
   // State for displaying clients from DB
   const [clients, setClients] = useState<any[]>([]);
   const [fetchingClients, setFetchingClients] = useState(true);
+
+  // SEARCH state
+  const [searchQuery, setSearchQuery] = useState("");
 
   // State for add-client form and dialog
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -250,6 +253,17 @@ export default function DashboardPage() {
     });
   }, [clients]);
 
+  // Поиск клиентов: фильтрация по имени или email
+  const filteredClients = useMemo(() => {
+    if (!searchQuery.trim()) return clients;
+    const q = searchQuery.trim().toLowerCase();
+    return clients.filter(
+      (client) =>
+        (client.name && client.name.toLowerCase().includes(q)) ||
+        (client.email && client.email.toLowerCase().includes(q))
+    );
+  }, [searchQuery, clients]);
+
   // ----------------------------------------------------------
 
   return (
@@ -268,15 +282,34 @@ export default function DashboardPage() {
       </header>
       {/* Main content */}
       <main className="flex flex-col flex-1 w-full max-w-5xl mx-auto py-10 px-4 gap-6">
-        <div className="flex justify-between items-center mb-6">
+        {/* SEARCH and ADD CLIENT ROW */}
+        <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
           <h2 className="text-3xl font-semibold text-slate-900">Мои клиенты</h2>
-          <Button
-            variant="default"
-            className="px-6 py-2 text-base font-medium"
-            onClick={() => setShowAddDialog(true)}
-          >
-            + Добавить клиента
-          </Button>
+          <div className="flex flex-1 gap-3 items-center justify-end max-w-lg ml-5">
+            {/* Поиск */}
+            <div className="relative flex-1 max-w-[320px] min-w-[220px] mr-2">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#ae9442] pointer-events-none">
+                <Search size={18} />
+              </span>
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Поиск по имени или email"
+                className="w-full pl-10 pr-3 py-2 border border-[#ae9442] rounded-[1rem] outline-none focus:ring-2 focus:ring-[#eadab2] transition-all font-['Playfair_Display',serif] text-base text-slate-800 placeholder:text-[#c1ae85] bg-white"
+                style={{
+                  fontFamily: "'Playfair Display', serif"
+                }}
+              />
+            </div>
+            {/* Кнопка добавления */}
+            <Button
+              variant="default"
+              className="px-6 py-2 text-base font-medium"
+              onClick={() => setShowAddDialog(true)}
+            >
+              + Добавить клиента
+            </Button>
+          </div>
         </div>
 
         {/* --- План на сегодня (новый блок) --- */}
@@ -511,8 +544,8 @@ export default function DashboardPage() {
                     Загрузка клиентов...
                   </TableCell>
                 </TableRow>
-              ) : clients.length > 0 ? (
-                clients.map((client) => (
+              ) : filteredClients.length > 0 ? (
+                filteredClients.map((client) => (
                   <TableRow key={client.id} className="hover:bg-muted/40 transition-colors">
                     <TableCell className="font-medium">{client.name}</TableCell>
                     <TableCell>
@@ -563,8 +596,11 @@ export default function DashboardPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-10 text-slate-400">
-                    Нет клиентов
+                  <TableCell colSpan={6} className="text-center py-10 text-[#b89238] font-['Playfair_Display',serif] text-xl">
+                    {searchQuery.trim()
+                      ? "Клиент с таким именем не найден"
+                      : "Нет клиентов"
+                    }
                   </TableCell>
                 </TableRow>
               )}
