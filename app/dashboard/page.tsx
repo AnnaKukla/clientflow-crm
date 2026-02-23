@@ -15,7 +15,21 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { Pencil, Trash, Eye } from "lucide-react"; // <-- добавлен Eye
+import { Pencil, Trash, Eye } from "lucide-react";
+
+// Для форматирования даты и времени по-русски
+const formatRusDateTime = (dateString: string | null | undefined) => {
+  if (!dateString) return "—";
+  const date = new Date(dateString);
+  if (isNaN(date.valueOf())) return "—";
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -43,19 +57,19 @@ export default function DashboardPage() {
   const [addPhone, setAddPhone] = useState("");
   const [addPrimaryRequest, setAddPrimaryRequest] = useState("");
   const [addStatus, setAddStatus] = useState("Новый");
+  const [addNextSession, setAddNextSession] = useState(""); // <---- new state
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
-  // Edit dialog
+  // Edit dialog - only single edit at a time
   const [showEditDialog, setShowEditDialog] = useState(false);
-  const [editClientLoading, setEditClientLoading] = useState(false);
-  const [editClientError, setEditClientError] = useState<string | null>(null);
   const [editClient, setEditClient] = useState<any | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
-  const [editPrimaryRequest, setEditPrimaryRequest] = useState("");
-  const [editStatus, setEditStatus] = useState("Новый");
+  const [editNextSession, setEditNextSession] = useState(""); // <---- new state
+  const [editClientLoading, setEditClientLoading] = useState(false);
+  const [editClientError, setEditClientError] = useState<string | null>(null);
 
   // Fetch clients on mount
   const fetchClients = async () => {
@@ -70,7 +84,6 @@ export default function DashboardPage() {
     setFetchingClients(false);
   };
 
-  // Initial load
   useEffect(() => {
     fetchClients();
   }, []);
@@ -103,7 +116,8 @@ export default function DashboardPage() {
       phone: addPhone ? addPhone : null,
       primary_request: addPrimaryRequest ? addPrimaryRequest : null,
       status: addStatus,
-      user_id: userData.user.id, // user_id ОБЯЗАТЕЛЬНО передан!
+      user_id: userData.user.id,
+      next_session: addNextSession ? new Date(addNextSession).toISOString() : null,
     };
 
     // Вставка в БД с user_id
@@ -117,16 +131,22 @@ export default function DashboardPage() {
       setAddPhone("");
       setAddPrimaryRequest("");
       setAddStatus("Новый");
+      setAddNextSession(""); // Очистить поле сессии
       await fetchClients();
     }
     setAddLoading(false);
   };
 
-  // Удаление клиента
+  // Удаление клиента с confirm и мгновенным обновлением clients на экране
   const deleteClient = async (id: number) => {
-    if (!window.confirm("Удалить клиента?")) return;
-    await supabase.from("clients").delete().eq("id", id);
-    await fetchClients();
+    const confirmed = window.confirm("Вы точно хотите удалить этого клиента?");
+    if (!confirmed) return;
+    const { error } = await supabase.from("clients").delete().eq("id", id);
+    if (!error) {
+      setClients(prevClients => prevClients.filter(client => client.id !== id));
+    } else {
+      // Можно обработать ошибку удаления, например, alert(error.message)
+    }
   };
 
   // Открыть диалог редактирования, подготовить данные
@@ -135,38 +155,60 @@ export default function DashboardPage() {
     setEditName(client.name || "");
     setEditEmail(client.email || "");
     setEditPhone(client.phone || "");
-    setEditPrimaryRequest(client.primary_request || "");
-    setEditStatus(client.status || "Новый");
+    setEditNextSession(
+      client.next_session
+        ? new Date(client.next_session).toISOString().slice(0, 16)
+        : ""
+    );
     setEditClientError(null);
     setShowEditDialog(true);
   };
 
-  // Сохранить изменения клиента
-  const handleEditClient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editClient?.id) return;
+  // Функция для обновления клиента (теперь с next_session)
+  const updateClient = async (
+    id: number,
+    values: { name: string; email: string; phone: string; next_session: string }
+  ) => {
     setEditClientLoading(true);
     setEditClientError(null);
-
     const { error } = await supabase
       .from("clients")
       .update({
-        name: editName,
-        email: editEmail || null,
-        phone: editPhone || null,
-        primary_request: editPrimaryRequest || null,
-        status: editStatus,
+        name: values.name,
+        email: values.email || null,
+        phone: values.phone || null,
+        next_session: values.next_session
+          ? new Date(values.next_session).toISOString()
+          : null,
       })
-      .eq("id", editClient.id);
+      .eq("id", id);
 
     if (error) {
       setEditClientError(error.message || "Ошибка при обновлении клиента");
+      setEditClientLoading(false);
+      return false;
     } else {
+      setEditClientLoading(false);
+      return true;
+    }
+  };
+
+  // Отправка формы редактирования
+  const handleEditClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editClient?.id) return;
+    const success = await updateClient(editClient.id, {
+      name: editName,
+      email: editEmail,
+      phone: editPhone,
+      next_session: editNextSession,
+    });
+
+    if (success) {
       setShowEditDialog(false);
       setEditClient(null);
       await fetchClients();
     }
-    setEditClientLoading(false);
   };
 
   return (
@@ -245,6 +287,18 @@ export default function DashboardPage() {
                   onChange={e => setAddPrimaryRequest(e.target.value)}
                   disabled={addLoading}
                 />
+                <input
+                  className="border rounded px-3 py-2 w-full"
+                  type="datetime-local"
+                  value={addNextSession}
+                  onChange={e => setAddNextSession(e.target.value)}
+                  disabled={addLoading}
+                  placeholder="Дата и время сессии"
+                  required={false}
+                />
+                <span className="text-sm text-gray-500">
+                  Дата и время сессии (необязательно)
+                </span>
                 <select
                   className="border rounded px-3 py-2 w-full"
                   value={addStatus}
@@ -281,7 +335,14 @@ export default function DashboardPage() {
         )}
 
         {/* Диалог редактирования клиента */}
-        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <Dialog open={showEditDialog} onOpenChange={(open) => {
+          setShowEditDialog(open);
+          if (!open) {
+            setEditClient(null);
+            setEditClientError(null);
+            setEditClientLoading(false);
+          }
+        }}>
           <DialogContent onClick={e => e.stopPropagation()} className="sm:max-w-[400px]">
             <DialogHeader>
               <DialogTitle>Редактировать клиента</DialogTitle>
@@ -313,20 +374,16 @@ export default function DashboardPage() {
                 />
                 <input
                   className="border rounded px-3 py-2 w-full"
-                  placeholder="Первичный запрос"
-                  value={editPrimaryRequest}
-                  onChange={e => setEditPrimaryRequest(e.target.value)}
+                  type="datetime-local"
+                  value={editNextSession}
+                  onChange={e => setEditNextSession(e.target.value)}
                   disabled={editClientLoading}
+                  placeholder="Дата и время сессии"
+                  required={false}
                 />
-                <select
-                  className="border rounded px-3 py-2 w-full"
-                  value={editStatus}
-                  onChange={e => setEditStatus(e.target.value)}
-                  disabled={editClientLoading}
-                >
-                  <option value="Новый">Новый</option>
-                  <option value="В работе">В работе</option>
-                </select>
+                <span className="text-sm text-gray-500">
+                  Дата и время сессии (необязательно)
+                </span>
                 {editClientError && (
                   <div className="bg-red-100 rounded border border-red-200 px-3 py-2 text-sm text-red-700">{editClientError}</div>
                 )}
@@ -357,6 +414,7 @@ export default function DashboardPage() {
                 <TableHead className="w-1/5">Имя</TableHead>
                 <TableHead className="w-1/4">Контакты</TableHead>
                 <TableHead className="w-1/6">Статус</TableHead>
+                <TableHead className="w-1/5">Сессия</TableHead>
                 <TableHead className="w-1/4">Первичный запрос</TableHead>
                 <TableHead className="w-1/6 text-right">Действия</TableHead>
               </TableRow>
@@ -364,7 +422,7 @@ export default function DashboardPage() {
             <TableBody>
               {fetchingClients ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground text-lg">
+                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground text-lg">
                     Загрузка клиентов...
                   </TableCell>
                 </TableRow>
@@ -381,10 +439,12 @@ export default function DashboardPage() {
                       {getStatusBadge(client.status)}
                     </TableCell>
                     <TableCell>
+                      <span className="text-slate-700">{formatRusDateTime(client.next_session)}</span>
+                    </TableCell>
+                    <TableCell>
                       <span className="text-slate-700">{client.primary_request || "—"}</span>
                     </TableCell>
                     <TableCell className="text-right flex gap-1 justify-end items-center">
-                      {/* Новая кнопка "глаз" для перехода в карточку клиента */}
                       <Link href={`/dashboard/client/${client.id}`}>
                         <Button
                           size="icon"
@@ -418,7 +478,7 @@ export default function DashboardPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-10 text-slate-400">
+                  <TableCell colSpan={6} className="text-center py-10 text-slate-400">
                     Нет клиентов
                   </TableCell>
                 </TableRow>
@@ -429,6 +489,4 @@ export default function DashboardPage() {
       </main>
     </div>
   );
-
-
 }
