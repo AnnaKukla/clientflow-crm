@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -26,6 +26,17 @@ const formatRusDateTime = (dateString: string | null | undefined) => {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// Только время для карточек-плана
+const formatRusTime = (dateString: string | null | undefined) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  if (isNaN(date.valueOf())) return "";
+  return date.toLocaleTimeString('ru-RU', {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -211,6 +222,36 @@ export default function DashboardPage() {
     }
   };
 
+  // -------- Новый функционал: План на сегодня ----------------
+
+  // Вычисляем today's clients сессии
+  const todaySessions = useMemo(() => {
+    // Определяем UTC полуночь сегодняшней даты и следующего дня
+    const now = new Date();
+
+    // Используем локальное время для пользователя
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const d = now.getDate();
+
+    const todayStart = new Date(y, m, d, 0, 0, 0, 0); // локальная полуночь
+    const todayEnd = new Date(y, m, d, 23, 59, 59, 999);
+
+    return clients.filter(client => {
+      if (!client.next_session) return false;
+      const date = new Date(client.next_session);
+      // Сессия входит в локальный "сегодня"
+      return date >= todayStart && date <= todayEnd;
+    }).sort((a, b) => {
+      // Сортировка по времени
+      const dA = new Date(a.next_session);
+      const dB = new Date(b.next_session);
+      return dA.getTime() - dB.getTime();
+    });
+  }, [clients]);
+
+  // ----------------------------------------------------------
+
   return (
     <div className="min-h-screen bg-muted flex flex-col">
       {/* Header */}
@@ -237,6 +278,50 @@ export default function DashboardPage() {
             + Добавить клиента
           </Button>
         </div>
+
+        {/* --- План на сегодня (новый блок) --- */}
+        <section aria-label="План на сегодня" className="mb-8">
+          <Card className="border-[1.5px] border-[#1156311A] shadow-none bg-[#f8fcf9]">
+            <CardHeader className="pb-0">
+              <CardTitle className="flex items-center gap-2 text-lg md:text-xl font-bold text-[#115631]">
+                План на сегодня
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2 pb-4">
+              {fetchingClients ? (
+                <div className="text-sm text-muted-foreground">
+                  Загрузка планов на сегодня…
+                </div>
+              ) : todaySessions.length > 0 ? (
+                <div>
+                  <div className="mb-3 text-base font-medium text-[#115631]">
+                    Сегодня у вас <span className="font-bold">{todaySessions.length}</span> {todaySessions.length === 1 ? "сессия" : (todaySessions.length < 5 ? "сессии" : "сессий")}
+                  </div>
+                  <ul className="flex flex-col gap-1">
+                    {todaySessions.map((session) => (
+                      <li key={session.id} className="flex flex-row items-center gap-2">
+                        <span className="block rounded px-2 bg-[#1156310D] text-[#115631] font-bold text-base py-1 min-w-[72px] text-center">
+                          {formatRusTime(session.next_session)}
+                        </span>
+                        <span className="ml-1 font-semibold text-slate-800">{session.name}</span>
+                        {session.primary_request && (
+                          <span className="ml-2 text-xs text-gray-500 truncate italic">– {session.primary_request}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="text-[#115631] font-medium text-base flex items-center gap-2 flex-wrap">
+                  <span className="text-2xl leading-none select-none">🌱</span>
+                  Сегодня встреч не запланировано. Идеальное время для отдыха или чтения книги!
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+        {/* --- Конец блока "План на сегодня" --- */}
+
         {/* диалог добавления клиента */}
         {showAddDialog && (
           <div
