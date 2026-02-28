@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Trash } from "lucide-react";
 
-// Включаем main_request и therapy_goals!
 type Client = {
   id: string;
   name: string;
@@ -44,6 +43,7 @@ function formatDateHuman(dateStr: string) {
       `${d} ${m.charAt(0).toLowerCase()}${m.slice(1)}${y}`
   );
 }
+
 function formatDateTimeExact(dateStr: string) {
   // "23.02.2024, 14:30"
   const date = new Date(dateStr);
@@ -63,8 +63,8 @@ export default function ClientCardPage() {
     typeof params.id === "string"
       ? params.id
       : Array.isArray(params.id)
-      ? params.id[0]
-      : "";
+        ? params.id[0]
+        : "";
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,23 +81,23 @@ export default function ClientCardPage() {
     setLoading(true);
     setNotesLoading(true);
 
-    // Теперь явно запрашиваем нужные поля (без primary_request)
+    // Явно запрашиваем только существующие поля клиента
     const { data: clientData, error: clientError } = await supabase
       .from("clients")
       .select(
         "id, name, email, phone, status, main_request, therapy_goals"
       )
       .eq("id", id)
-      .single();
+      .maybeSingle();
 
-    if (!clientError) {
+    if (!clientError && clientData) {
       setClient(clientData as Client);
     } else {
       setClient(null);
     }
     setLoading(false);
 
-    // Fetch notes
+    // Запрашиваем заметки
     const { data: notesData } = await supabase
       .from("notes")
       .select("*")
@@ -118,7 +118,7 @@ export default function ClientCardPage() {
     setAddingNote(true);
     setNoteError(null);
 
-    // Get user_id (from session)
+    // Получаем user_id из сессии
     const {
       data: { user },
       error: sessionError,
@@ -156,11 +156,7 @@ export default function ClientCardPage() {
     setDeletingNoteId(null);
   };
 
-  // Playfair font utility for headings
-  // (в классы добавим font-serif, text-xl/2xl или кастом на Playfair, зависит от globals.css)
-  // ОЖИДАЕТСЯ: --font-playfair/Playfair подключен в layout.tsx как className
-
-  // Сортировка - новые заметки сверху (запасная, если придет unsorted)
+  // Сортировка - новые заметки сверху (на случай, если с бэка придут неотсортированными)
   const sortedNotes = [...notes].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
@@ -186,41 +182,44 @@ export default function ClientCardPage() {
       ) : (
         <>
           <h1 className="text-3xl font-bold mb-6">{client.name}</h1>
-          {/* Винтажные блоки "Запрос" и "Цели терапии" */}
-          <div className="flex flex-col gap-4 mb-10">
+
+          {/* Восстановленный винтажный вид "Запрос" и "Цели терапии" */}
+          <div className="flex flex-col gap-5 mb-10">
             <div
-              className="rounded-xl px-6 py-4"
+              className="rounded-[24px] px-7 py-6"
               style={{
-                background:
-                  "oklch(0.97 0.03 90)", // мягкий теплый бумажный/пергамент фон
-                border: "1px solid oklch(0.85 0.015 85)",
-                boxShadow: "0 2px 6px 0 oklch(0.85 0.015 85 / .06)",
+                background: "oklch(0.98 0.017 87)",
+                border: "1.5px solid oklch(0.85 0.015 85)",
+                boxShadow: "0 2px 9px 0 oklch(0.81 0.015 81 / 0.11)",
               }}
             >
               <div
-                className="font-serif text-2xl mb-2 text-primary"
+                className="font-serif text-[1.72rem] leading-tight mb-2 text-primary"
                 style={{ fontFamily: "var(--font-playfair),serif" }}
               >
                 Запрос
               </div>
-              <div className="text-lg whitespace-pre-line text-foreground">
+              <div className="text-lg whitespace-pre-line text-foreground" style={{ minHeight: "1.9em" }}>
                 {client.main_request?.trim()
                   ? client.main_request
                   : <span className="text-gray-400">—</span>}
               </div>
             </div>
             <div
-              className="rounded-xl px-6 py-4"
+              className="rounded-[24px] px-7 py-6"
               style={{
-                background: "oklch(0.97 0.03 90)",
-                border: "1px solid oklch(0.85 0.015 85)",
-                boxShadow: "0 2px 6px 0 oklch(0.85 0.015 85 / .06)",
+                background: "oklch(0.98 0.017 87)",
+                border: "1.5px solid oklch(0.85 0.015 85)",
+                boxShadow: "0 2px 9px 0 oklch(0.81 0.015 81 / 0.11)",
               }}
             >
-              <div className="font-serif text-2xl mb-2 text-primary" style={{ fontFamily: "var(--font-playfair),serif" }}>
+              <div
+                className="font-serif text-[1.72rem] leading-tight mb-2 text-primary"
+                style={{ fontFamily: "var(--font-playfair),serif" }}
+              >
                 Цели терапии
               </div>
-              <div className="text-lg whitespace-pre-line text-foreground">
+              <div className="text-lg whitespace-pre-line text-foreground" style={{ minHeight: "1.9em" }}>
                 {client.therapy_goals?.trim()
                   ? client.therapy_goals
                   : <span className="text-gray-400">—</span>}
@@ -314,7 +313,6 @@ export default function ClientCardPage() {
                         key={note.id}
                         className="rounded-[18px] border-[1.5px] px-0 py-0 bg-[oklch(0.98_0.02_88)] border-[oklch(0.82_0.015_82)] shadow-[0_2px_8px_0_oklch(0.85_0.015_85_/_0.048)] overflow-hidden flex flex-col"
                         style={{
-                          // Легкая имитация винтажности и "стопки"
                           marginBottom: "0.25em",
                         }}
                       >
